@@ -4,11 +4,11 @@
 
 ### NestJS Modular Design
 
-The application is split into three feature modules — `AuthModule`, `UsersModule`, and `LoansModule` — each with clear boundaries. This mirrors domain-driven design principles and makes the codebase easy to navigate, test, and extend independently.
+The application is split into three feature modules — `AppJwtModule`, `AuthModule`, `CommonModule`,`UsersModule`, and `LoansModule` — each with clear boundaries. This mirrors domain-driven design principles and makes the codebase easy to navigate, test, and extend independently.
 
-### PostgreSQL + TypeORM
+### PostgreSQL + Prisma
 
-PostgreSQL was chosen for its ACID guarantees, which are non-negotiable for financial data. TypeORM with `synchronize: true` (only in non-production) is used for rapid development while keeping the schema in sync with entities. In a production system, this would be replaced with versioned migrations.
+PostgreSQL was chosen for its ACID guarantees, which are non-negotiable for financial data. Prisma is used for rapid development while keeping the schema in sync with the database. I chose prisma because it provides type-safe database access and migrations. And it's very easy to setup. 
 
 ### Redis for Caching
 
@@ -16,13 +16,17 @@ Redis is used to cache paginated loan list responses per user per page, with a 5
 
 ### Database Transactions
 
-Loan approval and repayment operations use TypeORM's `DataSource.transaction()` to ensure atomicity. For example, when approving a loan, both the loan status update and the user balance credit happen within the same transaction — if either fails, the entire operation is rolled back. This prevents partial state corruption.
+Loan approval and repayment operations use Prisma's `transactions` to ensure atomicity and above all isolation. For example, when approving a loan, both the loan status update and the user balance credit happen within the same transaction — if either fails, the entire operation is rolled back. This prevents partial state corruption.
+
+### Unique Database Constriant on Table Loans
+
+This ensures that a user can only have one ACTIVE or PENDING loan at a time. This is a database level constraint achieved using a partial index. 
 
 ---
 
 ## Assumptions
 
-- **Currency is stored as a prisma decimal** (no currency conversion) in the `balance` and loan `amount` columns. In production, I would use integer amounts in the smallest currency unit (kobo) to avoid floating-point precision issues.
+- **Currency is stored as a prisma decimal** (no currency conversion) in the `balance` and loan `amount` columns.
 - **No interest is calculated.** The outstanding balance equals the original loan amount. A real system would include interest rate logic, amortisation schedules, and scheduled jobs.
 - **One active loan constraint** covers `PENDING`, `APPROVED`, and `ACTIVE` statuses. A user must fully repay or be rejected before applying again.
 - **Repayment caps at outstanding balance.** If a user overpays, the excess is silently capped. In production this would return a clear error or handle refunds.
@@ -34,7 +38,7 @@ Loan approval and repayment operations use TypeORM's `DataSource.transaction()` 
 
 ### `synchronize: true` vs Migrations
 
-I used prisma migrations because it's very easy to set up and works well with NestJS & TypeScript.
+I used prisma migrations because it's very easy to set up and works well with NestJS & TypeScript and is better than using synchronize: true.
 
 ### Cache Invalidation Strategy
 

@@ -14,6 +14,7 @@ import { LoanStateMachine } from './loan-state-machine';
 import { Prisma } from 'src/prisma/generated/client';
 import { LoanPaginationDto } from './dto/loan-pagination.dto';
 import { ProcessLoanDto, ProcessLoanStatus } from './dto/process-loan.dto';
+import { PrismaClientKnownRequestError } from '@prisma/client/runtime/client';
 
 @Injectable()
 export class LoansService {
@@ -43,14 +44,26 @@ export class LoansService {
           }
         }
 
-        return await tx.loan.create({
-          data: {
-            user_id: user.id,
-            amount: applyLoanDto.amount,
-            durationMonths: applyLoanDto.durationInMonths,
-            outstandingBalance: applyLoanDto.amount,
-          },
-        });
+        try {
+          return await tx.loan.create({
+            data: {
+              user_id: user.id,
+              amount: applyLoanDto.amount,
+              durationMonths: applyLoanDto.durationInMonths,
+              outstandingBalance: applyLoanDto.amount,
+            },
+          });
+        } catch (error) {
+          if (
+            error instanceof PrismaClientKnownRequestError &&
+            error.code === 'P2002'
+          ) {
+            throw new ConflictException(
+              'You already have an active or pending loan.',
+            );
+          }
+          console.log(error);
+        }
       },
       {
         isolationLevel: TransactionIsolationLevel.Serializable,
