@@ -65,7 +65,4 @@ export class LoansController {
       return this.loanService.adminQueryLoans(paginationDto);
     }
   }
-
-  //   @Get()
-  //   async adminQueryLoans(@Query() paginationDto: LoanPaginationDto) {}
 }
