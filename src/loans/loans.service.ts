@@ -4,7 +4,6 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
-  UnauthorizedException,
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { ApplyLoanDto } from './dto/apply-loan.dto';
@@ -75,38 +74,25 @@ export class LoansService {
             ? LoanStatus.ACTIVE
             : LoanStatus.REJECTED;
 
-        const [existingLoan, existingUser] = await Promise.all([
-          tx.loan.findFirst({
-            where: {
-              id: loan_id,
-            },
-            select: {
-              id: true,
-              amount: true,
-              outstandingBalance: true,
-              status: true,
-              user: {
-                select: {
-                  balance: true,
-                  id: true,
-                },
+        const existingLoan = await tx.loan.findFirst({
+          where: {
+            id: loan_id,
+          },
+          select: {
+            id: true,
+            amount: true,
+            outstandingBalance: true,
+            status: true,
+            user: {
+              select: {
+                id: true,
               },
             },
-          }),
-
-          tx.user.findFirst({
-            where: {
-              id: user.id,
-            },
-          }),
-        ]);
+          },
+        });
 
         if (!existingLoan) {
           throw new NotFoundException(`Loan with id ${loan_id} not found.`);
-        }
-
-        if (!existingUser) {
-          throw new UnauthorizedException();
         }
 
         if (!LoanStateMachine.canTransition(existingLoan.status, loanStatus)) {
@@ -124,21 +110,31 @@ export class LoansService {
           note,
         };
 
-        const loan = await tx.loan.update({
-          where: { id: loan_id },
+        const results = await tx.loan.updateMany({
+          where: { id: loan_id, status: LoanStatus.PENDING },
           data,
         });
 
-        const balance = existingLoan.amount.plus(
-          new Prisma.Decimal(existingLoan.user.balance),
-        );
+        if (results.count === 0) {
+          throw new BadRequestException('Loan has already been processed.');
+        }
 
-        await tx.user.update({
-          where: { id: existingLoan.user.id },
-          data: { balance },
+        if (loanStatus === LoanStatus.ACTIVE) {
+          await tx.user.update({
+            where: { id: existingLoan.user.id },
+            data: {
+              balance: {
+                increment: existingLoan.amount,
+              },
+            },
+          });
+        }
+
+        return await tx.loan.findUnique({
+          where: {
+            id: existingLoan.id,
+          },
         });
-
-        return loan;
       },
       {
         isolationLevel: TransactionIsolationLevel.Serializable,
@@ -151,25 +147,29 @@ export class LoansService {
   async repayLoan(user: AuthenticatedUser, loan_id: string, amount: number) {
     return await this.prismaService.$transaction(
       async (tx) => {
-        const [existingLoan, existingUser] = await Promise.all([
-          tx.loan.findFirst({
-            where: { id: loan_id },
-          }),
+        const repayAmount = new Prisma.Decimal(amount);
 
-          tx.user.findFirst({
-            where: { id: user.id },
-          }),
-        ]);
+        const existingLoan = await tx.loan.findFirst({
+          where: { id: loan_id },
+          select: {
+            user_id: true,
+            status: true,
+            outstandingBalance: true,
+            id: true,
+            user: {
+              select: {
+                id: true,
+                balance: true,
+              },
+            },
+          },
+        });
 
         if (!existingLoan) {
           throw new NotFoundException(`Loan with id ${loan_id} not found.`);
         }
 
-        if (!existingUser) {
-          throw new UnauthorizedException();
-        }
-
-        if (existingLoan.user_id !== existingUser.id) {
+        if (existingLoan.user_id !== user.id) {
           throw new ForbiddenException();
         }
 
@@ -179,59 +179,93 @@ export class LoansService {
           );
         }
 
-        if (
-          existingLoan.outstandingBalance.lessThan(new Prisma.Decimal(amount))
-        ) {
+        if (existingLoan.outstandingBalance.lessThan(repayAmount)) {
           throw new BadRequestException(
-            `Excess funds deposit. Deposit: ${amount}, required loan balance: ${existingLoan.outstandingBalance.toString()}.`,
+            `Excess funds deposit. Deposit: ${repayAmount.toString()}, required loan balance: ${existingLoan.outstandingBalance.toString()}.`,
           );
         }
 
-        if (existingUser.balance.lessThan(new Prisma.Decimal(amount))) {
+        if (existingLoan.user.balance.lessThan(repayAmount)) {
           throw new BadRequestException(
-            `Insufficient balance. Available: ${existingUser.balance.toString()}, required: ${amount}.`,
+            `Insufficient balance. Available: ${existingLoan.user.balance.toString()}, required: ${repayAmount.toString()}.`,
           );
         }
 
         // Deduct the amount from the user's balance
-        const updatedUserBalance = existingUser.balance.minus(
-          new Prisma.Decimal(amount),
-        );
-
-        await tx.user.update({
-          where: { id: user.id },
+        const userResult = await tx.user.updateMany({
+          where: {
+            id: user.id,
+            balance: {
+              gte: repayAmount,
+            },
+          },
           data: {
-            balance: updatedUserBalance,
+            balance: {
+              decrement: repayAmount,
+            },
           },
         });
 
-        // Deduct the amount from the loan's outstandingBalance
-        const updatedLoanBalance = existingLoan.outstandingBalance.minus(
-          new Prisma.Decimal(amount),
-        );
+        if (userResult.count === 0) {
+          throw new BadRequestException(
+            `Insufficient balance. Available: ${existingLoan.user.balance.toString()}, required: ${repayAmount.toString()}.`,
+          );
+        }
 
-        const loanUpdateData = {
-          outstandingBalance: updatedLoanBalance,
-          ...(updatedLoanBalance.lessThanOrEqualTo(0)
-            ? { status: LoanStatus.COMPLETED, completed_at: new Date() }
-            : {}),
-        };
-
-        const loan = await tx.loan.update({
-          where: { id: loan_id },
-          data: loanUpdateData,
+        const loanUpdateResult = await tx.loan.updateMany({
+          where: {
+            id: loan_id,
+            status: LoanStatus.ACTIVE,
+            user_id: user.id,
+            outstandingBalance: {
+              gte: repayAmount,
+            },
+          },
+          data: {
+            outstandingBalance: {
+              decrement: repayAmount,
+            },
+          },
         });
+
+        if (loanUpdateResult.count === 0) {
+          throw new BadRequestException(
+            `Excess funds deposit. Deposit: ${repayAmount.toString()}, required loan balance: ${existingLoan.outstandingBalance.toString()}.`,
+          );
+        }
+
+        let updatedLoan = await tx.loan.findUnique({
+          where: { id: loan_id },
+        });
+
+        if (!updatedLoan) {
+          throw new NotFoundException(`Loan with id ${loan_id} not found.`);
+        }
 
         // Create a repayment for the loan with the amount paid and the current balance
         await tx.repayment.create({
           data: {
             loan_id,
-            amount: new Prisma.Decimal(amount),
-            balance_after: updatedLoanBalance,
+            amount: repayAmount,
+            balance_after: updatedLoan.outstandingBalance,
           },
         });
 
-        return loan;
+        if (updatedLoan.outstandingBalance.equals(0)) {
+          await tx.loan.updateMany({
+            where: { id: loan_id, status: LoanStatus.ACTIVE },
+            data: {
+              status: LoanStatus.COMPLETED,
+              completed_at: new Date(),
+            },
+          });
+
+          updatedLoan = await tx.loan.findUnique({
+            where: { id: loan_id },
+          });
+        }
+
+        return updatedLoan;
       },
       {
         isolationLevel: TransactionIsolationLevel.Serializable,
@@ -242,97 +276,79 @@ export class LoansService {
   }
 
   async queryLoans(user: AuthenticatedUser, paginationDto: LoanPaginationDto) {
-    return await this.prismaService.$transaction(
-      async (tx) => {
-        const { limit, page } = paginationDto;
+    const { limit, page } = paginationDto;
 
-        const skip = (page - 1) * limit;
+    const skip = (page - 1) * limit;
 
-        const loans = await tx.loan.findMany({
-          where: {
-            user_id: user.id,
-          },
-          skip,
-          take: limit,
+    const loans = await this.prismaService.loan.findMany({
+      where: {
+        user_id: user.id,
+      },
+      skip,
+      take: limit,
+      select: {
+        admin_id: true,
+        approved_at: true,
+        completed_at: true,
+        amount: true,
+        created_at: true,
+        updated_at: true,
+        id: true,
+        durationMonths: true,
+        notes: true,
+        status: true,
+        outstandingBalance: true,
+        repayments: {
           select: {
-            admin_id: true,
-            approved_at: true,
-            completed_at: true,
             amount: true,
-            created_at: true,
-            updated_at: true,
-            id: true,
-            durationMonths: true,
-            notes: true,
-            status: true,
-            outstandingBalance: true,
-            repayments: {
-              select: {
-                amount: true,
-                balance_after: true,
-                loan_id: true,
-              },
-            },
+            balance_after: true,
+            loan_id: true,
           },
-        });
+        },
+      },
+    });
 
-        return loans;
-      },
-      {
-        isolationLevel: TransactionIsolationLevel.Serializable,
-        maxWait: 30000,
-        timeout: 30000,
-      },
-    );
+    return loans;
   }
 
   async adminQueryLoans(paginationDto: LoanPaginationDto) {
-    return await this.prismaService.$transaction(
-      async (tx) => {
-        const { limit, page } = paginationDto;
-        const skip = (page - 1) * limit;
+    const { limit, page } = paginationDto;
+    const skip = (page - 1) * limit;
 
-        const loans = await tx.loan.findMany({
-          skip,
-          take: limit,
+    const loans = await this.prismaService.loan.findMany({
+      skip,
+      take: limit,
+      select: {
+        admin_id: true,
+        approved_at: true,
+        completed_at: true,
+        amount: true,
+        created_at: true,
+        updated_at: true,
+        id: true,
+        durationMonths: true,
+        notes: true,
+        status: true,
+        outstandingBalance: true,
+
+        repayments: {
           select: {
-            admin_id: true,
-            approved_at: true,
-            completed_at: true,
             amount: true,
-            created_at: true,
-            updated_at: true,
-            id: true,
-            durationMonths: true,
-            notes: true,
-            status: true,
-            outstandingBalance: true,
-
-            repayments: {
-              select: {
-                amount: true,
-                balance_after: true,
-                loan_id: true,
-              },
-            },
-            user: {
-              select: {
-                name: true,
-                email: true,
-                role: true,
-                balance: true,
-              },
-            },
+            balance_after: true,
+            loan_id: true,
           },
-        });
+        },
+        user: {
+          select: {
+            name: true,
+            email: true,
+            role: true,
+            balance: true,
+          },
+        },
+      },
+    });
 
-        return loans;
-      },
-      {
-        isolationLevel: TransactionIsolationLevel.Serializable,
-        maxWait: 30000,
-        timeout: 30000,
-      },
-    );
+    return loans;
   }
 }

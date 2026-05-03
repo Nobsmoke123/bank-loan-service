@@ -10,7 +10,7 @@ model Loan {
     user               User        @relation(name: "loan_owner_relation", fields: [user_id], references: [id])
     user_id            String
     admin              User?       @relation(name: "admin_officer_relation", fields: [admin_id], references: [id])
-    admin_id           String? // The admin that processed the loan.
+    admin_id           String?      // The admin that processed the loan.
     amount             Decimal     @db.Decimal(14, 4)
     durationMonths     Int
     status             LoanStatus  @default(PENDING)
