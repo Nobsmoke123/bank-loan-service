@@ -1,0 +1,98 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/prisma/generated"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// === loan.schema.prisma ===
+enum LoanStatus {
+    PENDING
+    ACTIVE
+    REJECTED
+    COMPLETED
+}
+
+model Loan {
+    id                 String      @id @default(cuid())
+    user               User        @relation(name: "loan_owner_relation", fields: [user_id], references: [id])
+    user_id            String
+    admin              User?       @relation(name: "admin_officer_relation", fields: [admin_id], references: [id])
+    admin_id           String? // The admin that processed the loan.
+    amount             Decimal
+    durationMonths     Int
+    status             LoanStatus  @default(PENDING)
+    outstandingBalance Decimal
+    notes              String?
+    repayments         Repayment[] @relation("loan_relation")
+    approved_at        DateTime?
+    completed_at       DateTime?
+    created_at         DateTime    @default(now())
+    updated_at         DateTime    @updatedAt
+
+    @@map("loans")
+}
+
+
+// === repayments.schema.prisma ===
+model Repayment {
+    id            String   @id @default(cuid())
+    loan          Loan     @relation(name: "loan_relation", fields: [loan_id], references: [id])
+    loan_id       String
+    amount        Decimal  @db.Decimal(14, 4)
+    balance_after Decimal  @db.Decimal(14, 4)
+    created_at    DateTime @default(now())
+
+    @@map("repayments")
+}
+
+
+// === tokens.schema.prisma ===
+model Token {
+    id           String   @id @default(cuid())
+    user         User     @relation(fields: [user_id], references: [id])
+    user_id      String
+    token_id     String
+    ip_address   String
+    device_os    String?
+    user_agent   String?
+    tokenVersion Int
+    is_revoked   Boolean  @default(false)
+    loggedin_at  DateTime @default(now())
+    loggedout_at DateTime?
+
+    @@map("tokens")
+}
+
+
+// === user.schema.prisma ===
+enum UserRole {
+    CUSTOMER
+    ADMIN
+}
+
+model User {
+    id             String   @id @default(cuid())
+    name           String
+    email          String   @unique
+    role           UserRole @default(CUSTOMER)
+    password       String
+    balance        Decimal  @db.Decimal(14, 4)
+    tokenVersion   Int      @default(0)
+    loans          Loan[]   @relation("loan_owner_relation")
+    processedLoans Loan[]   @relation("admin_officer_relation")
+    tokens         Token[]
+    created_at     DateTime @default(now())
+    updated_at     DateTime @updatedAt
+
+    @@map("users")
+}

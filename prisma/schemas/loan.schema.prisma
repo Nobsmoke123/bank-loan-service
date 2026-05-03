@@ -1,0 +1,26 @@
+enum LoanStatus {
+    PENDING
+    ACTIVE
+    REJECTED
+    COMPLETED
+}
+
+model Loan {
+    id                 String      @id @default(cuid())
+    user               User        @relation(name: "loan_owner_relation", fields: [user_id], references: [id])
+    user_id            String
+    admin              User?       @relation(name: "admin_officer_relation", fields: [admin_id], references: [id])
+    admin_id           String? // The admin that processed the loan.
+    amount             Decimal     @db.Decimal(14, 4)
+    durationMonths     Int
+    status             LoanStatus  @default(PENDING)
+    outstandingBalance Decimal     @db.Decimal(14, 4)
+    notes              String?
+    repayments         Repayment[] @relation("loan_relation")
+    approved_at        DateTime?
+    completed_at       DateTime?
+    created_at         DateTime    @default(now())
+    updated_at         DateTime    @updatedAt
+
+    @@map("loans")
+}

@@ -1,0 +1,10 @@
+model Repayment {
+    id            String   @id @default(cuid())
+    loan          Loan     @relation(name: "loan_relation", fields: [loan_id], references: [id])
+    loan_id       String
+    amount        Decimal  @db.Decimal(14, 4)
+    balance_after Decimal  @db.Decimal(14, 4)
+    created_at    DateTime @default(now())
+
+    @@map("repayments")
+}

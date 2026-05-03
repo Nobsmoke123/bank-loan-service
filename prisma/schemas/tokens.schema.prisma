@@ -1,0 +1,15 @@
+model Token {
+    id           String    @id @default(cuid())
+    user         User      @relation(fields: [user_id], references: [id])
+    user_id      String
+    token_id     String    @unique
+    ip_address   String
+    device_os    String?
+    user_agent   String?
+    tokenVersion Int
+    is_revoked   Boolean   @default(false)
+    loggedin_at  DateTime  @default(now())
+    loggedout_at DateTime?
+
+    @@map("tokens")
+}
