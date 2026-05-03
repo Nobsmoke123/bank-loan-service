@@ -173,6 +173,12 @@ export class LoansService {
           throw new ForbiddenException();
         }
 
+        if (existingLoan.status !== LoanStatus.ACTIVE) {
+          throw new BadRequestException(
+            `Loan is already ${existingLoan.status}. Only active loans can be repayed.`,
+          );
+        }
+
         if (
           existingLoan.outstandingBalance.lessThan(new Prisma.Decimal(amount))
         ) {
@@ -207,7 +213,7 @@ export class LoansService {
         const loanUpdateData = {
           outstandingBalance: updatedLoanBalance,
           ...(updatedLoanBalance.lessThanOrEqualTo(0)
-            ? { status: LoanStatus.COMPLETED }
+            ? { status: LoanStatus.COMPLETED, completed_at: new Date() }
             : {}),
         };
 
