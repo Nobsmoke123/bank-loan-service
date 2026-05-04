@@ -1,0 +1,44 @@
+[
+  {
+    "name": "Admin One",
+    "email": "admin1@gtmb.com",
+    "password": "donald123",
+    "role": "ADMIN",
+    "balance": 0.0
+  },
+  {
+    "name": "Admin Two",
+    "email": "admin2@gtmb.com",
+    "password": "donald123",
+    "role": "ADMIN",
+    "balance": 0.0
+  },
+  {
+    "name": "Hank Griffin",
+    "email": "hank@gtmb.com",
+    "password": "donald123",
+    "role": "CUSTOMER",
+    "balance": 50000
+  },
+  {
+    "name": "Nick Buckhart",
+    "email": "nick@gtmb.com",
+    "password": "donald123",
+    "role": "CUSTOMER",
+    "balance": 100000
+  },
+  {
+    "name": "Jacob Dew",
+    "email": "jacob@gtmb.com",
+    "password": "donald123",
+    "role": "CUSTOMER",
+    "balance": 200000
+  },
+  {
+    "name": "Mathew Stark",
+    "email": "matt@gtmb.com",
+    "password": "donald123",
+    "role": "CUSTOMER",
+    "balance": 0.0
+  }
+]
