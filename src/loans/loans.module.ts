@@ -7,6 +7,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { KeyvCacheableMemory } from 'cacheable';
 import { Keyv } from 'keyv';
 import KeyvRedis from '@keyv/redis';
+import Redis from 'ioredis';
 
 @Module({
   imports: [
@@ -14,21 +15,31 @@ import KeyvRedis from '@keyv/redis';
     CacheModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: async (configService: ConfigService) => ({
-        ttl: configService.get<number>('REDIS_TTL')!,
+      useFactory: (configService: ConfigService) => ({
+        ttl: Number(configService.get<string>('REDIS_TTL')!),
         stores: [
           new Keyv({
             store: new KeyvCacheableMemory({
-              lruSize: configService.get<number>('REDIS_LRU_SIZE')!,
+              ttl: Number(configService.get<string>('REDIS_TTL')!),
+              lruSize: Number(configService.get<string>('REDIS_LRU_SIZE')!),
             }),
           }),
 
-          new KeyvRedis(configService.get<string>('REDIS_URL')!),
+          new KeyvRedis(configService.get<string>('REDIS_URL')),
         ],
       }),
     }),
   ],
-  providers: [LoansService],
+  providers: [
+    LoansService,
+    {
+      provide: 'REDIS_CLIENT',
+      useFactory: (configService: ConfigService) => {
+        return new Redis(configService.get<string>('REDIS_URL')!);
+      },
+      inject: [ConfigService],
+    },
+  ],
   controllers: [LoansController],
 })
 export class LoansModule {}

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -11,17 +12,24 @@ import { AuthenticatedUser } from 'src/common/interfaces/auth-user.interface';
 import { LoanStatus } from 'src/prisma/generated/enums';
 import { TransactionIsolationLevel } from 'src/prisma/generated/internal/prismaNamespace';
 import { LoanStateMachine } from './loan-state-machine';
-import { Prisma } from 'src/prisma/generated/client';
+import { Loan, Prisma } from 'src/prisma/generated/client';
 import { LoanPaginationDto } from './dto/loan-pagination.dto';
 import { ProcessLoanDto, ProcessLoanStatus } from './dto/process-loan.dto';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/client';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
+import Redis from 'ioredis';
 
 @Injectable()
 export class LoansService {
-  constructor(private readonly prismaService: PrismaService) {}
+  constructor(
+    private readonly prismaService: PrismaService,
+    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
+    @Inject('REDIS_CLIENT') private readonly redis: Redis,
+  ) {}
 
   async applyLoan(user: AuthenticatedUser, applyLoanDto: ApplyLoanDto) {
-    return await this.prismaService.$transaction(
+    const loan = await this.prismaService.$transaction(
       async (tx) => {
         const existingLoan = await tx.loan.findFirst({
           where: {
@@ -71,6 +79,11 @@ export class LoansService {
         timeout: 30000,
       },
     );
+
+    await this.invalidateCache(user.id);
+    await this.invalidateAdminLoansCache();
+
+    return loan;
   }
 
   async processLoan(
@@ -78,7 +91,7 @@ export class LoansService {
     loan_id: string,
     processLoanDto: ProcessLoanDto,
   ) {
-    return await this.prismaService.$transaction(
+    const loan = await this.prismaService.$transaction(
       async (tx) => {
         const { status, note } = processLoanDto;
 
@@ -155,10 +168,15 @@ export class LoansService {
         timeout: 30000,
       },
     );
+
+    await this.invalidateCache(user.id);
+    await this.invalidateAdminLoansCache();
+
+    return loan;
   }
 
   async repayLoan(user: AuthenticatedUser, loan_id: string, amount: number) {
-    return await this.prismaService.$transaction(
+    const loan = await this.prismaService.$transaction(
       async (tx) => {
         const repayAmount = new Prisma.Decimal(amount);
 
@@ -286,12 +304,25 @@ export class LoansService {
         timeout: 30000,
       },
     );
+
+    await this.invalidateCache(user.id);
+    await this.invalidateAdminLoansCache();
+
+    return loan;
   }
 
   async queryLoans(user: AuthenticatedUser, paginationDto: LoanPaginationDto) {
     const { limit, page } = paginationDto;
 
     const skip = (page - 1) * limit;
+
+    const cacheKey = this.buildCacheKey(user, paginationDto);
+
+    const cached = await this.cacheManager.get<string>(cacheKey);
+
+    if (cached) {
+      return cached;
+    }
 
     const loans = await this.prismaService.loan.findMany({
       where: {
@@ -321,12 +352,22 @@ export class LoansService {
       },
     });
 
+    await this.setLoanUserCacheKey(user.id, cacheKey, loans, 60_000);
+
     return loans;
   }
 
   async adminQueryLoans(paginationDto: LoanPaginationDto) {
     const { limit, page } = paginationDto;
     const skip = (page - 1) * limit;
+
+    const cacheKey = this.buildAdminLoansCacheKey(paginationDto);
+
+    const cached = await this.redis.get(cacheKey);
+
+    if (cached) {
+      return JSON.parse(cached) as unknown as Loan[];
+    }
 
     const loans = await this.prismaService.loan.findMany({
       skip,
@@ -362,6 +403,84 @@ export class LoansService {
       },
     });
 
+    await this.setAdminLoansCacheKey(cacheKey, loans, 60_000);
+
     return loans;
+  }
+
+  private buildCacheKey(
+    user: AuthenticatedUser,
+    paginationDto: LoanPaginationDto,
+  ) {
+    const { limit, page } = paginationDto;
+    return `loans:user:${user.id}:page:${page}:limit:${limit}`;
+  }
+
+  private async setLoanUserCacheKey(
+    user_id: string,
+    cacheKey: string,
+    value: unknown,
+    ttlMs: number = 60_000,
+  ) {
+    const setKey = this.buildUsersLoanCacheSetKey(user_id);
+
+    await this.cacheManager.set(cacheKey, value, ttlMs);
+
+    await this.cacheManager.get<string>(cacheKey);
+
+    await this.redis.sadd(setKey, cacheKey);
+
+    await this.redis.expire(setKey, ttlMs);
+  }
+
+  private async invalidateCache(user_id: string) {
+    const setKey = this.buildUsersLoanCacheSetKey(user_id);
+
+    const keys = await this.redis.smembers(setKey);
+
+    if (keys.length > 0) {
+      await Promise.all(keys.map((key) => this.cacheManager.del(key)));
+    }
+
+    await this.redis.del(setKey);
+  }
+
+  private buildUsersLoanCacheSetKey(user_id: string) {
+    return `loans:user:${user_id}:keys`;
+  }
+
+  private buildAdminLoansCacheSetKey() {
+    return `loans:admin:keys`;
+  }
+
+  private buildAdminLoansCacheKey(paginationDto: LoanPaginationDto) {
+    const { page, limit } = paginationDto;
+    return `loans:admin:page:${page}:limit:${limit}`;
+  }
+
+  private async setAdminLoansCacheKey(
+    cacheKey: string,
+    value: unknown,
+    ttlMs: number = 60_000,
+  ) {
+    const setKey = this.buildAdminLoansCacheSetKey();
+
+    await this.cacheManager.set(cacheKey, value, ttlMs);
+
+    await this.redis.sadd(setKey, cacheKey);
+
+    await this.redis.expire(setKey, Math.ceil(ttlMs / 1000));
+  }
+
+  private async invalidateAdminLoansCache() {
+    const setKey = this.buildAdminLoansCacheSetKey();
+
+    const keys = await this.redis.smembers(setKey);
+
+    if (keys.length > 0) {
+      await Promise.all(keys.map((key) => this.cacheManager.del(key)));
+    }
+
+    await this.redis.del(setKey);
   }
 }
