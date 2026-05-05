@@ -34,6 +34,14 @@ export class LoansController {
     return this.loanService.applyLoan(user, applyLoanDto);
   }
 
+  @Get(':id')
+  async getLoan(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') loan_id: string,
+  ) {
+    return this.loanService.getLoan(user, loan_id);
+  }
+
   @Patch(':id')
   @Role(UserRole.ADMIN)
   async processLoan(

@@ -175,6 +175,59 @@ export class LoansService {
     return loan;
   }
 
+  async getLoan(user: AuthenticatedUser, loan_id: string) {
+    const loan = await this.prismaService.loan.findUnique({
+      where: {
+        id: loan_id,
+      },
+      select: {
+        id: true,
+        user_id: true,
+        amount: true,
+        durationMonths: true,
+        status: true,
+        admin_id: true,
+        admin: {
+          select: {
+            name: true,
+          },
+        },
+        approved_at: true,
+        completed_at: true,
+        outstandingBalance: true,
+        notes: true,
+        created_at: true,
+        updated_at: true,
+        repayments: {
+          select: {
+            amount: true,
+            balance_after: true,
+            created_at: true,
+            id: true,
+          },
+        },
+        user: {
+          select: {
+            name: true,
+            email: true,
+            role: true,
+            balance: true,
+          },
+        },
+      },
+    });
+
+    if (!loan) {
+      throw new NotFoundException(`Loan with id ${loan_id} not found.`);
+    }
+
+    if (user.role !== "ADMIN" && loan.user_id !== user.id) {
+      throw new ForbiddenException();
+    }
+
+    return loan;
+  }
+
   async repayLoan(user: AuthenticatedUser, loan_id: string, amount: number) {
     const loan = await this.prismaService.$transaction(
       async (tx) => {
