@@ -53,11 +53,14 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     res.clearCookie('access_token', {
-      maxAge: 0,
-      expires: new Date(),
       httpOnly: true,
+      secure: this.configService.get<string>('NODE_ENV')! === 'production',
+      sameSite: 'lax',
+      maxAge: 0,
+      signed: true,
+      expires: new Date(0),
     });
-    return this.authService.logOut(user);
+    return await this.authService.logOut(user);
   }
 
   @UseGuards(AuthGuard)

@@ -40,5 +40,12 @@
     "password": "donald123",
     "role": "CUSTOMER",
     "balance": 0.0
+  },
+  {
+    "name": "Rosalee Pekins",
+    "email": "perkins@gtmb.com",
+    "password": "donald123",
+    "role": "CUSTOMER",
+    "balance": 1110.0
   }
 ]
