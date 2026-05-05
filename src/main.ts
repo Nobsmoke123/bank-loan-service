@@ -17,7 +17,7 @@ async function bootstrap() {
     app.set('trust proxy', false);
   }
 
-  app.use(cookieParser(configService.get<string>('COOKIE_PARSER_SECRET')!));
+  app.use(cookieParser(configService.get<string>('COOKIE_PARSER_SECRET')));
 
   app.use(helmet());
 

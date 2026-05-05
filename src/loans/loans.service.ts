@@ -221,7 +221,7 @@ export class LoansService {
       throw new NotFoundException(`Loan with id ${loan_id} not found.`);
     }
 
-    if (user.role !== "ADMIN" && loan.user_id !== user.id) {
+    if (user.role !== 'ADMIN' && loan.user_id !== user.id) {
       throw new ForbiddenException();
     }
 

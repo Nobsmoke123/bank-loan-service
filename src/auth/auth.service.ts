@@ -151,14 +151,13 @@ export class AuthService {
         throw new UnauthorizedException();
       }
 
-    await this.prismaService.token.updateMany({
-      where: { id: user.auth_token_id, token_id: user.jwt_id },
-      data: {
-        is_revoked: true,
-        loggedout_at: new Date(),
-      },
-    });
-
+      await this.prismaService.token.updateMany({
+        where: { id: user.auth_token_id, token_id: user.jwt_id },
+        data: {
+          is_revoked: true,
+          loggedout_at: new Date(),
+        },
+      });
 
       return 'Logged out successfully.';
     });
