@@ -5,6 +5,7 @@ import * as cors from 'cors';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import * as cookieParser from 'cookie-parser';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -15,6 +16,8 @@ async function bootstrap() {
   } else {
     app.set('trust proxy', false);
   }
+
+  app.use(cookieParser(configService.get<string>('COOKIE_PARSER_SECRET')!));
 
   app.use(helmet());
 

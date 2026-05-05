@@ -48,7 +48,15 @@ export class AuthController {
 
   @UseGuards(AuthGuard)
   @Post('logout')
-  async logOut(@CurrentUser() user: AuthenticatedUser) {
+  async logOut(
+    @CurrentUser() user: AuthenticatedUser,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    res.clearCookie('access_token', {
+      maxAge: 0,
+      expires: new Date(),
+      httpOnly: true,
+    });
     return this.authService.logOut(user);
   }
 
@@ -68,6 +76,7 @@ export class AuthController {
       secure: this.configService.get<string>('NODE_ENV')! === 'production',
       sameSite: 'lax',
       maxAge: parseInt(this.configService.get('JWT_EXPIRES_IN')!) * 60 * 1000,
+      signed: true,
     });
   }
 }
